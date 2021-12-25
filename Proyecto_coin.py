@@ -12,12 +12,6 @@ from plotly.subplots import make_subplots
 
 st.set_page_config(page_title='Cripto hoy', page_icon=":moneybag:", layout='wide', initial_sidebar_state='auto')
 
-# Configuración de la API
-kraken = krakenex.API()
-
-# Conexión con la API
-api = KrakenAPI(kraken)
-
 st.markdown(
         f""" <style>.reportview-container .main .block-container{{
         max-width: {1450}px;
@@ -52,6 +46,9 @@ with c3:
     fecha_elegida = st.date_input("Elija la fecha de inicio", value=datetime.date.today(),
                                   min_value=None, max_value=datetime.date.today(), key=None)
 
+# Se crea una barra lateral en la que se encuentra una casilla. Si se activa esta casilla, aparecerá un VWAP que tendrá
+# en consideración el número de intervalos a elegir por el usuario en lugar de todos.
+
 st.sidebar.markdown("<h4 style='text-align: center;'>Seleccione la casilla para visualizar el VWAP que tenga en cuenta "
                     "el número de intervalos que desee:</h4>", unsafe_allow_html=True)
 
@@ -59,19 +56,23 @@ vwap_por_intervalos = st.sidebar.checkbox('VWAP por intervalos',
                                           help="Si selecciona esta casilla, además del VWAP completo, "
                                                "puede visualizar un VWAP que tenga en cuenta los intervalos que desee")
 
+# La selección de los intervalos que tendrá en cuenta este VWAP es condicional a que la casilla esté activada, en caso
+# contrario, no se podrá elegir este número de intervalos.
+
 if vwap_por_intervalos:
     numero_intervalos = st.sidebar.number_input('Elija el nº de intervalos del VWAP',
                                                 min_value=1, max_value=720, value=50, step=25)
 
-# El intervalo se corresponde con el tiempo que abarca cada una de las velas y se presenta en forma de slider
+# El intervalo elegido se corresponde con el tiempo que abarca cada una de las velas del gráfico
+# y se presenta en forma de slider.
 
 intervalo_elegido = st.select_slider("Seleccione el intervalo de tiempo que tendrá cada vela del gráfico:",
                                      ("1 minuto", "5 minutos", "15 minutos", "30 minutos",
                                       "1 hora", "4 horas", "1 día", "7 días", "15 días"),
                                      value="15 minutos")
 
-# Con esta función se convierte el texto introducido por el usuario en el código de la moneda, que posteriormente
-# se pasará a la función con la que se descargarán los datos.
+# Con esta función se convierte el texto introducido por el usuario en los desplegables anteriores
+# en el código de la moneda, que posteriormente se pasará a la función con la que se descargarán los datos.
 
 
 def convertir_formato_moneda(cripto_str, divisa_str):
@@ -83,7 +84,7 @@ def convertir_formato_moneda(cripto_str, divisa_str):
 
     return divisa_codigo
 
-# Con esta función se convierte el texto introducido por el usuario en un entero que representa el tiempo
+# Con esta función se convierte el texto introducido por el usuario en el slider en un entero que representa el tiempo
 # del intervalo, que posteriormente se pasará a la función con la que se descargarán los datos.
 
 
@@ -105,6 +106,7 @@ def convertir_fecha_inicio(fecha_calendario):
 
     return tiempo_unix
 
+
 # Con esta función, se llamará a las anteriores, se descargarán los datos dependiendo de la selección
 # del usuario y se graficará el precio de la moneda elegida, el vwap y el volumen.
 
@@ -115,17 +117,28 @@ def grafico_moneda():
     fecha = convertir_fecha_inicio(fecha_elegida)
 
     df = api.get_ohlc_data(pair=coin, interval=intervalo, since=fecha, ascending=True)  # Se descargan los datos
+
+    # Hay que quedarse con el primer objeto que devuelve la función al descargar los datos y después
+    # se resetea el index, ya que la fecha está en el índice de las filas y de esta manera pasa a ser una columna más.
+
     datos = df[0]
-    datos = datos.reset_index()  # Se resetea el index, ya que la fecha está en el índice de las filas.
-                                 # De esta manera pasa a ser una columna.
+    datos = datos.reset_index()
 
     # Se despliega un aviso si el número de intervalos descargados es 720, ya que coincide
     # con el límite que permite la API
+
     if datos.shape[0] == 720:
         st.warning("No se pueden visualizar más de 720 intervalos de tiempo. "
                    "Seleccione intervalos de tiempo más grandes o un día de inicio más reciente")
+
+    # Se calcula el precio típico, que es la suma del máximo, del mínimo y del cierre y se divide entre 3. Con ello
+    # se calcula después el VWAP.
+
     datos["typical_price"] = (datos["high"] + datos["low"] + datos["close"]) / 3
     datos["vwap_completo"] = np.cumsum(datos["typical_price"] * datos["volume"]) / np.cumsum(datos["volume"])
+
+    # Se crea el gráfico. Para ello se crea una matriz de dos filas y una columna. En la primera fila se insertan
+    # el gráfico de velas y el VWAP. En la segunda fila se grafica el volumen.
 
     graph_cripto = make_subplots(rows=2, cols=1, shared_xaxes=True,
                                  vertical_spacing=0.06,
@@ -155,6 +168,9 @@ def grafico_moneda():
                                   showlegend=False),
                            row=2, col=1)
 
+    # En el caso de que la casilla de la barra lateral esté activa, se grafica también este VWAP en la primera fila,
+    # es decir, sobre el gráfico del precio.
+
     if vwap_por_intervalos:
         lista_vwap = []
         i = 1
@@ -163,7 +179,7 @@ def grafico_moneda():
             lista_vwap.append(vwap)
             i += 1
         else:
-            for i in range(numero_intervalos, datos.shape[0]):
+            for i in range(numero_intervalos, datos.shape[0] + 1):
                 vwap = np.sum(datos["typical_price"][(i - numero_intervalos):i] * datos["volume"][(i - numero_intervalos):i]) / np.sum(datos["volume"][(i - numero_intervalos):i])
                 lista_vwap.append(vwap)
 
@@ -177,18 +193,32 @@ def grafico_moneda():
                                           marker_color='rgba(5, 255, 5, 1)'),
                                row=1, col=1)
 
+    # Se le pone como eje y al gráfico el siguiente comando, que variará de dólares a euros dependiendo
+    # de la selección del usuario.
+
     graph_cripto.update_layout(
         yaxis_title="Precio " + ("(Dólares)" if divisa_elegida == "USD" else "(Euros)"),
         height=700)
+
+    # Se establece en False que se muestre debajo del gráfico del precio el mismo gráfico "en pequeño", que da la
+    # posibilidad de hacer zoom, ya que en su lugar se prefiere que ahí aparezca el volumen negociado.
 
     graph_cripto.update(layout_xaxis_rangeslider_visible=False)
 
     return graph_cripto
 
 
+# Finalmente se llama a la función grafico_moneda y se grafica el precio y el volumen. Se tienen en cuenta
+# los 3 posibles errores que puede mandar la API en caso de que falle la conexión o haya algún problema con la API.
+
 try:
+    # Configuración de la API
+    kraken = krakenex.API()
+
+    # Conexión con la API
+    api = KrakenAPI(kraken)
+
     graf = grafico_moneda()
     st.plotly_chart(graf, use_container_width=True)
 except (HTTPError, KrakenAPIError, CallRateLimitError) as err:
     st.warning("Actualmente el servicio no está disponible. Por favor, inténtelo de nuevo más tarde.")
-
