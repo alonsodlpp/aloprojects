@@ -12,6 +12,7 @@ numpy = "*"
 pandas = "*"
 streamlit = "*"
 plotly = "*"
+importlib-metadata = "*"
 
 [dev-packages]
 
