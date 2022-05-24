@@ -1,4 +1,4 @@
-# Cryptocurrencies real-time price
+# Cryptocurrencies in real time
 
 In this project, a web app has been created which shows the price in real time of three cryptocurrencies.
 
